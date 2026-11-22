@@ -1,0 +1,10 @@
+.build/
+build/
+core/target/
+vendor/
+app/Sources/TideFFI/*.swift
+.DS_Store
+scripts/.bootstrap.log
+*.xcframework
+app/Frameworks/
+scripts/.signing-identity
