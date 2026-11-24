@@ -93,9 +93,13 @@ impl Journal {
 }
 
 /// Pieces to re-verify after a crash at `crashed_at`: done in the control file but not in the
-/// newest snapshot taken ≥ FLUSH_MARGIN before the crash, plus everything in flight. Without a
-/// usable snapshot every done piece is suspect.
-pub fn suspects(control_bits: &[u8], piece_count: u32, journal: &TaskJournal, crashed_at: i64, in_flight: &[u32]) -> Vec<u32> {
+/// newest snapshot taken ≥ FLUSH_MARGIN before the crash. Without a usable snapshot every done
+/// piece is suspect.
+///
+/// Pieces still in flight are never suspect: they can't pass a hash check (they're incomplete),
+/// and aria2 hash-checks each piece when it completes, so blocks that never reached the disk just
+/// make that piece fail and download again. Keeping their partial progress is safe.
+pub fn suspects(control_bits: &[u8], piece_count: u32, journal: &TaskJournal, crashed_at: i64) -> Vec<u32> {
     let safe = journal
         .snapshots
         .iter()
@@ -103,13 +107,7 @@ pub fn suspects(control_bits: &[u8], piece_count: u32, journal: &TaskJournal, cr
         .find(|s| s.ts <= crashed_at - FLUSH_MARGIN_SECS)
         .and_then(|s| crate::torrent::unhex(&s.bitfield_hex));
     let has = |bits: &[u8], i: u32| bits.get((i / 8) as usize).is_some_and(|b| b & (0x80 >> (i % 8)) != 0);
-    let mut out: Vec<u32> = (0..piece_count)
-        .filter(|&i| has(control_bits, i) && safe.as_deref().map_or(true, |s| !has(s, i)))
-        .collect();
-    out.extend(in_flight.iter().copied().filter(|&i| i < piece_count));
-    out.sort_unstable();
-    out.dedup();
-    out
+    (0..piece_count).filter(|&i| has(control_bits, i) && safe.as_deref().map_or(true, |s| !has(s, i))).collect()
 }
 
 fn boot_time() -> Option<i64> {
@@ -136,13 +134,22 @@ mod tests {
                 Snapshot { ts: 1000 - 10, bitfield_hex: "ff80".into() }, // too recent to trust
             ],
         };
-        assert_eq!(suspects(&control, 16, &j, 1000, &[12]), vec![6, 7, 8, 9, 12]);
+        assert_eq!(suspects(&control, 16, &j, 1000), vec![6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn idle_before_the_crash_means_nothing_to_check() {
+        // Paused for hours before the power went: the last snapshot matches the control file, so
+        // nothing is suspect (in-flight pieces are left to aria2's own piece hash check).
+        let control = vec![0b1111_0000];
+        let j = TaskJournal { snapshots: vec![Snapshot { ts: 1000 - 6 * 3600, bitfield_hex: "f0".into() }] };
+        assert!(suspects(&control, 8, &j, 1000).is_empty());
     }
 
     #[test]
     fn no_snapshot_means_all_done_pieces() {
         let control = vec![0b1010_0000];
-        assert_eq!(suspects(&control, 8, &TaskJournal::default(), 1000, &[]), vec![0, 2]);
+        assert_eq!(suspects(&control, 8, &TaskJournal::default(), 1000), vec![0, 2]);
     }
 
     #[test]

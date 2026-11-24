@@ -913,8 +913,7 @@ impl Engine {
         let Ok(c) = ControlFile::read(&cpath) else { return false };
         let sel = r.selected.clone().unwrap_or_else(|| t.all_indexes());
         let wanted: HashSet<u32> = t.pieces_for_files(&sel).into_iter().collect();
-        let in_flight: Vec<u32> = c.in_flight.iter().map(|p| p.index).collect();
-        let mut suspects = journal::suspects(&c.bitfield, c.piece_count(), &st.journal.load(id), crashed_at, &in_flight);
+        let mut suspects = journal::suspects(&c.bitfield, c.piece_count(), &st.journal.load(id), crashed_at);
         suspects.retain(|p| wanted.contains(p));
         if suspects.is_empty() {
             return false;
@@ -977,17 +976,34 @@ impl Engine {
                 c.in_flight.clear();
             }
             VerifyMode::Suspect(_) => {
+                // In-flight pieces weren't checked and stay as they are (see journal::suspects).
                 for &p in &res.bad {
                     c.set(p, false);
                 }
                 for &p in &res.good {
                     c.set(p, true);
                 }
-                c.in_flight.clear();
             }
         }
-        let ok = c.write(&cpath).is_ok();
-        tlog!("verified {} pieces of {} in {:.1}s: {} good, {} bad (written={ok})", res.good.len() + res.bad.len(), t.name, res.elapsed.as_secs_f64(), res.good.len(), res.bad.len());
+        let written = c.write(&cpath);
+        tlog!("verified {} pieces of {} in {:.1}s: {} good, {} bad", res.good.len() + res.bad.len(), t.name, res.elapsed.as_secs_f64(), res.good.len(), res.bad.len());
+        if let Err(e) = written {
+            tlog!("couldn't save the checked progress of {} to {}: {e}", t.name, cpath.display());
+            if let Some(r) = st.lib.records.iter_mut().find(|r| r.id == id) {
+                match mode {
+                    // aria2 continues from the existing progress file: the record stays as it was.
+                    VerifyMode::Suspect(_) => r.resumed_at = Some(now()),
+                    // There's no usable progress file to continue from: say so instead of guessing.
+                    VerifyMode::Missing | VerifyMode::Full => {
+                        r.problem = Some(StoredProblem { code: 16, message: format!("couldn't save progress: {e}") });
+                    }
+                }
+            }
+            st.store.save(&st.lib);
+            drop(st);
+            self.wake();
+            return;
+        }
         let sel_done = {
             let r = st.lib.records.iter().find(|r| r.id == id);
             let sel = r.and_then(|r| r.selected.clone()).unwrap_or_else(|| t.all_indexes());
