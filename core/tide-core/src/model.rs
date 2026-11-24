@@ -299,6 +299,10 @@ pub struct CoreEnvironment {
     pub network_expensive: bool,
     pub boot_volume_name: String,
     pub utc_offset_seconds: i64,
+    /// Bumped by the app whenever the Mac joins a different network or comes back from having
+    /// none. aria2's peer discovery (DHT, UDP trackers) doesn't survive that, so the engine starts
+    /// a fresh aria2 before BitTorrent needs it.
+    pub network_generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -378,6 +382,7 @@ impl Default for CoreEnvironment {
             network_expensive: false,
             boot_volume_name: "Macintosh HD".into(),
             utc_offset_seconds: 0,
+            network_generation: 0,
         }
     }
 }

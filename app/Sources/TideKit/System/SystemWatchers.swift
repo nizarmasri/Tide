@@ -13,6 +13,8 @@ public final class SystemWatchers: NSObject {
     private let model: AppModel
     private var env = SystemEnvironment()
     private let pathMonitor = NWPathMonitor()
+    private var lastNetworkFingerprint: String?
+    private var networkWasDown = false
     private var powerSource: CFRunLoopSource?
     private var sleepAssertion: IOPMAssertionID = 0
     private var assertionReason: String?
@@ -103,16 +105,39 @@ public final class SystemWatchers: NSObject {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let available = path.status == .satisfied
             let expensive = path.isExpensive || path.isConstrained
+            let fingerprint = Self.fingerprint(path)
             DispatchQueue.main.async {
                 guard let self else { return }
+                var changed = false
                 if self.env.networkAvailable != available || self.env.networkExpensive != expensive {
                     self.env.networkAvailable = available
                     self.env.networkExpensive = expensive
-                    self.push()
+                    changed = true
                 }
+                if available {
+                    // Another network, or the same one after a drop (the Mac's address went away):
+                    // aria2's peer discovery doesn't recover from either on its own.
+                    let joinedAnother = self.lastNetworkFingerprint.map { $0 != fingerprint } ?? false
+                    if joinedAnother || self.networkWasDown {
+                        self.env.networkGeneration &+= 1
+                        changed = true
+                    }
+                    self.lastNetworkFingerprint = fingerprint
+                    self.networkWasDown = false
+                } else {
+                    self.networkWasDown = true
+                }
+                if changed { self.push() }
             }
         }
         pathMonitor.start(queue: DispatchQueue(label: "tide.network"))
+    }
+
+    /// Which network the Mac is on: the interfaces in use (in preference order) and their routers.
+    private nonisolated static func fingerprint(_ path: NWPath) -> String {
+        let interfaces = path.availableInterfaces.map { "\($0.name):\($0.type)" }
+        let gateways = path.gateways.map { "\($0)" }.sorted()
+        return (interfaces + ["via"] + gateways).joined(separator: " ")
     }
 
     // MARK: Periodic: keep awake, settings side effects

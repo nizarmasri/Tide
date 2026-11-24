@@ -228,14 +228,15 @@ fn schedule_holds_and_start_now_overrides() {
     e.shutdown();
 }
 
-/// Import + resume a half-finished BitTorrent download straight from aria2's progress file:
-/// progress must appear at once and aria2 must not rehash (no peers needed for this check).
-#[test]
-fn bt_import_resumes_from_progress_file_without_hashing() {
+fn aria2_pid(env: &Env) -> i32 {
+    let out = std::process::Command::new("pgrep").args(["-f", &format!("aria2c --conf-path={}", env.support.path().join("aria2.conf").display())]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("0").trim().parse().unwrap_or(0)
+}
+
+/// A half-finished 2-file torrent (big video + junk text, 16 KiB pieces) in `dir`: the .torrent,
+/// the first 15 pieces on disk and aria2's progress file saying so. Returns (name, piece size).
+fn partial_torrent(dir: &std::path::Path) -> (&'static str, usize) {
     use tide_core::control_file::ControlFile;
-    let env = Env { support: tempfile::tempdir().unwrap(), logs: tempfile::tempdir().unwrap(), downloads: tempfile::tempdir().unwrap() };
-    let dir = env.downloads.path();
-    // A typical 2-file torrent: big video + junk text, 16 KiB pieces.
     let piece = 16 * 1024usize;
     let movie_len = 40 * piece + 123;
     let data: Vec<u8> = (0..movie_len + 64).map(|i| ((i * 13 + 5) % 251) as u8 + 1).collect();
@@ -262,6 +263,18 @@ fn bt_import_resumes_from_progress_file_without_hashing() {
     let mut c = ControlFile::new_bt(&tide_core::torrent::unhex(&t.info_hash).unwrap(), piece as u32, t.total_length, vec![0; (t.piece_count() as usize).div_ceil(8)]);
     for p in 0..15 { c.set(p, true); }
     c.write(&dir.join(format!("{name}.aria2"))).unwrap();
+    (name, piece)
+}
+
+/// Import + resume a half-finished BitTorrent download straight from aria2's progress file:
+/// progress must appear at once and aria2 must not rehash (no peers needed for this check).
+#[test]
+fn bt_import_resumes_from_progress_file_without_hashing() {
+    use tide_core::control_file::ControlFile;
+    let env = Env { support: tempfile::tempdir().unwrap(), logs: tempfile::tempdir().unwrap(), downloads: tempfile::tempdir().unwrap() };
+    let dir = env.downloads.path();
+    let (name, piece) = partial_torrent(dir);
+    let movie_len = 40 * piece + 123;
 
     let cap = Arc::new(Capture::default());
     let e = engine(&env, cap.clone());
@@ -290,4 +303,58 @@ fn bt_import_resumes_from_progress_file_without_hashing() {
     e.shutdown();
     let after = ControlFile::read(&dir.join(format!("{name}.aria2"))).unwrap();
     assert!(after.done_count() >= 15, "progress lost: {}", after.done_count());
+}
+
+/// The Mac moving to another network leaves aria2's peer discovery (DHT, UDP trackers) wedged for
+/// good. A paused torrent must not trigger a restart, but resuming it must happen on a fresh aria2
+/// (never `unpause` on the old one), and a network change while it runs must refresh aria2 too,
+/// each time continuing from the progress file.
+#[test]
+fn network_change_refreshes_aria2_for_bittorrent() {
+    let env = Env { support: tempfile::tempdir().unwrap(), logs: tempfile::tempdir().unwrap(), downloads: tempfile::tempdir().unwrap() };
+    let dir = env.downloads.path();
+    let (_, piece) = partial_torrent(dir);
+    let cap = Arc::new(Capture::default());
+    let e = engine(&env, cap.clone());
+    wait_for(&cap, "engine running", 10, |s| matches!(s.engine, CoreEngineState::Running { .. }));
+    let found = e.scan_imports(&dir.to_string_lossy());
+    let ids = e.import(vec![CoreImportRequest { id: found[0].id.clone(), directory: found[0].directory.clone(), selected_files: None }]).unwrap();
+    let in_aria2 = |s: &CoreSnapshot| {
+        matches!(s.engine, CoreEngineState::Running { .. }) && !s.tasks.is_empty()
+            && matches!(task(s).phase, CorePhase::Resuming | CorePhase::Downloading | CorePhase::Stalled)
+            && task(s).pieces_done == Some(15)
+    };
+    wait_for(&cap, "imported task in aria2", 15, in_aria2);
+    let first = aria2_pid(&env);
+    assert!(first > 0);
+
+    // Paused when the network changes: aria2 is left alone until BitTorrent needs it.
+    e.pause(ids.clone());
+    wait_for(&cap, "paused", 10, |s| matches!(task(s).phase, CorePhase::Paused));
+    e.update_environment(CoreEnvironment { network_generation: 1, ..CoreEnvironment::default() });
+    std::thread::sleep(Duration::from_secs(8));
+    assert_eq!(aria2_pid(&env), first, "restarted aria2 although nothing BitTorrent was running");
+
+    // Resume: a fresh aria2 takes over before the download continues, from the progress file.
+    e.resume(ids.clone());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while aria2_pid(&env) == first && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let second = aria2_pid(&env);
+    assert!(second > 0 && second != first, "resume after a network change kept the old aria2");
+    wait_for(&cap, "task back in the fresh aria2", 15, in_aria2);
+
+    // A network change while it runs refreshes aria2 again once the network has settled.
+    e.update_environment(CoreEnvironment { network_generation: 2, ..CoreEnvironment::default() });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while aria2_pid(&env) == second && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_ne!(aria2_pid(&env), second, "network change while downloading kept the old aria2");
+    let s = wait_for(&cap, "task back after the second refresh", 15, in_aria2);
+    assert_eq!(task(&s).completed_bytes as usize, 15 * piece, "progress lost across restarts");
+    let log = std::fs::read_to_string(env.logs.path().join("tide.log")).unwrap_or_default();
+    assert_eq!(log.matches("restarting aria2: the network changed").count(), 2, "{log}");
+    e.shutdown();
 }

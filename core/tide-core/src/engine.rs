@@ -115,6 +115,14 @@ struct State {
     suspect_pending: HashSet<String>,
     crashed_at: Option<i64>,
     last_moving: HashMap<String, Instant>,
+    /// `env.network_generation` when the running aria2 started (None while none runs).
+    engine_net_gen: Option<u64>,
+    /// When `env.network_generation` last changed.
+    net_changed_at: Instant,
+    /// Torrents running in aria2 without a single peer connection, and since when.
+    zero_peers_since: HashMap<String, Instant>,
+    last_discovery_restart: Option<Instant>,
+    discovery_backoff: Duration,
     applied_global: Option<(u64, u64)>,
     applied_concurrency: Option<u32>,
     last_journal: Instant,
@@ -169,6 +177,39 @@ fn engine_options(s: &CoreSettings) -> EngineOptions {
 /// Options whose change needs an aria2 restart (everything else is applied live).
 fn restart_key(o: &EngineOptions) -> (u16, bool, bool, bool, bool, u32, String) {
     (o.listen_port, o.dht, o.pex, o.lpd, o.prefer_encryption, o.max_peers, o.advanced.clone())
+}
+
+// MARK: Peer-discovery health
+//
+// aria2 opens its DHT/UDP-tracker socket once and keeps it for its whole life. After the Mac moved
+// to another Wi-Fi network, that socket was seen refusing every send with EWOULDBLOCK for good.
+// aria2 takes that as "try later" (DHT queue stuck, lookups never finish) or even as sent (UDP
+// trackers), logs nothing, and torrents sit at 0 peers ("Looking for peers") forever while the
+// rest of aria2 works. A fresh aria2 (fresh sockets) fixes it and is cheap, since every download
+// continues from its progress file without rehashing.
+
+/// A network change must settle this long before aria2 is restarted for it.
+const NETWORK_SETTLE: Duration = Duration::from_secs(5);
+/// Working discovery finds peers for a live swarm within a minute or two (aria2 asks the DHT every
+/// minute while a torrent has no peers), so this long without any is a wedge, not bad luck.
+const DISCOVERY_STALL: Duration = Duration::from_secs(10 * 60);
+/// Restarts for a stall back off from DISCOVERY_STALL up to this, so a truly dead swarm costs at
+/// most one restart this often.
+const DISCOVERY_BACKOFF_MAX: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// The running aria2 was started on an older network and BitTorrent is about to rely on it.
+/// While nothing BitTorrent wants to run, the restart waits (it then happens before the resume).
+fn network_refresh_due(engine_gen: Option<u64>, env_gen: u64, network_up: bool, settled_for: Duration, torrent_wants_to_run: bool) -> bool {
+    engine_gen.is_some_and(|g| g != env_gen) && network_up && settled_for >= NETWORK_SETTLE && torrent_wants_to_run
+}
+
+/// Peer discovery is presumed dead when a running torrent has had no peer for DISCOVERY_STALL and
+/// no torrent has any peer (if one does, discovery works and that swarm is just empty), and the
+/// previous stall restart was at least `backoff` ago.
+fn discovery_dead(longest_without_peers: Option<Duration>, any_torrent_connected: bool, since_last_restart: Option<Duration>, backoff: Duration) -> bool {
+    !any_torrent_connected
+        && longest_without_peers.is_some_and(|d| d >= DISCOVERY_STALL)
+        && since_last_restart.map_or(true, |d| d >= backoff)
 }
 
 fn tag(t: Tag) -> CoreFileTag {
@@ -287,6 +328,11 @@ impl Engine {
                 suspect_pending: HashSet::new(),
                 crashed_at: None,
                 last_moving: HashMap::new(),
+                engine_net_gen: None,
+                net_changed_at: Instant::now(),
+                zero_peers_since: HashMap::new(),
+                last_discovery_restart: None,
+                discovery_backoff: DISCOVERY_STALL,
                 applied_global: None,
                 applied_concurrency: None,
                 last_journal: Instant::now(),
@@ -383,9 +429,12 @@ impl Engine {
             if st.aria2.is_some() {
                 self.poll(&mut st);
                 self.transitions(&mut st);
-                self.reconcile(&mut st);
-                self.apply_globals(&mut st);
-                self.journal_tick(&mut st);
+                // A restart hands everything back on the next tick, from a fresh aria2.
+                if !self.refresh_peer_discovery(&mut st) {
+                    self.reconcile(&mut st);
+                    self.apply_globals(&mut st);
+                    self.journal_tick(&mut st);
+                }
             } else {
                 self.volume_transitions(&mut st);
             }
@@ -434,6 +483,8 @@ impl Engine {
                 tlog!("aria2 {} running on port {} (pid {})", a.version, a.port, a.pid());
                 st.engine = CoreEngineState::Running { version: a.version.clone() };
                 st.aria2 = Some(a);
+                st.engine_net_gen = Some(st.env.network_generation);
+                st.zero_peers_since.clear();
                 st.engine_opts = Some(opts.clone());
                 st.applied_global = Some((opts.down_limit, opts.up_limit));
                 st.applied_concurrency = Some(opts.max_concurrent);
@@ -511,6 +562,73 @@ impl Engine {
             }
         }
         Self::remove_result(st, gid);
+    }
+
+    /// Stops aria2 (it writes every progress file) and starts a fresh one on the next tick;
+    /// reconcile then hands each download back as it was, continuing from its progress file.
+    fn restart_aria2(st: &mut State, reason: &str) {
+        tlog!("restarting aria2: {reason}");
+        if let Some(a) = st.aria2.take() {
+            a.stop();
+        }
+        st.added.clear();
+        st.live.clear();
+        st.zero_peers_since.clear();
+        st.engine_net_gen = None;
+        st.engine = CoreEngineState::Starting;
+        st.backoff = Duration::from_secs(1);
+        st.next_restart = Some(Instant::now());
+    }
+
+    /// Keeps `zero_peers_since` current from the latest poll. Returns whether any torrent in aria2
+    /// has a peer connection right now.
+    fn track_discovery(st: &mut State) -> bool {
+        let now = Instant::now();
+        let mut without_peers = HashSet::new();
+        let mut any_connected = false;
+        for r in st.lib.records.iter().filter(|r| matches!(r.kind, Kind::Torrent | Kind::Magnet)) {
+            let Some(l) = st.live.get(&r.gid) else { continue };
+            if l.connections > 0 {
+                any_connected = true;
+            } else if l.status == "active" && !l.seeder && !l.verify_pending && st.env.network_available {
+                without_peers.insert(r.id.clone());
+            }
+        }
+        st.zero_peers_since.retain(|id, _| without_peers.contains(id));
+        for id in without_peers {
+            st.zero_peers_since.entry(id).or_insert(now);
+        }
+        if any_connected {
+            st.discovery_backoff = DISCOVERY_STALL;
+            st.last_discovery_restart = None;
+        }
+        any_connected
+    }
+
+    /// Restarts aria2 when its peer discovery can't be trusted: the network changed under it, or
+    /// every running torrent has gone without peers for too long. Returns true if it restarted.
+    fn refresh_peer_discovery(&self, st: &mut State) -> bool {
+        let any_connected = Self::track_discovery(st);
+        let (hours, auto) = (Self::hours(st), Self::auto_pause(st));
+        let torrent_wants_to_run = st.lib.records.iter().any(|r| {
+            matches!(r.kind, Kind::Torrent | Kind::Magnet) && Self::desired_running(st, r, hours, auto) && volume::is_available(&r.dir_path())
+        });
+        let reason = if network_refresh_due(st.engine_net_gen, st.env.network_generation, st.env.network_available, st.net_changed_at.elapsed(), torrent_wants_to_run) {
+            "the network changed, so peer discovery has to start over on the new one".to_string()
+        } else {
+            let longest = st.zero_peers_since.values().map(|t| t.elapsed()).max();
+            let since_last = st.last_discovery_restart.map(|t| t.elapsed());
+            if !discovery_dead(longest, any_connected, since_last, st.discovery_backoff) {
+                return false;
+            }
+            st.last_discovery_restart = Some(Instant::now());
+            let backoff = st.discovery_backoff;
+            st.discovery_backoff = (backoff * 2).min(DISCOVERY_BACKOFF_MAX);
+            format!("no torrent has found a peer in {} min (next check in {} min at the earliest)", DISCOVERY_STALL.as_secs() / 60, st.discovery_backoff.as_secs() / 60)
+        };
+        Self::restart_aria2(st, &reason);
+        self.wake();
+        true
     }
 
     // MARK: Transitions (what aria2 reports → library)
@@ -1248,33 +1366,23 @@ impl Engine {
             let new = engine_options(&s);
             st.settings = s;
             if st.aria2.is_some() && restart_key(&old) != restart_key(&new) {
-                tlog!("engine options changed; restarting aria2");
-                if let Some(a) = st.aria2.take() {
-                    a.stop();
-                }
-                st.added.clear();
-                st.live.clear();
-                st.next_restart = Some(Instant::now());
+                Self::restart_aria2(st, "engine options changed");
             }
             st.applied_concurrency = None;
         });
     }
 
     pub fn update_environment(&self, env: CoreEnvironment) {
-        self.with(|st| st.env = env);
+        self.with(|st| {
+            if env.network_generation != st.env.network_generation {
+                st.net_changed_at = Instant::now();
+            }
+            st.env = env;
+        });
     }
 
     pub fn restart_engine(&self) {
-        self.with(|st| {
-            if let Some(a) = st.aria2.take() {
-                a.stop();
-            }
-            st.added.clear();
-            st.live.clear();
-            st.engine = CoreEngineState::Starting;
-            st.backoff = Duration::from_secs(1);
-            st.next_restart = Some(Instant::now());
-        });
+        self.with(|st| Self::restart_aria2(st, "requested"));
     }
 
     pub fn volume_will_unmount(&self, mount: &str) {
@@ -1937,5 +2045,36 @@ mod tests {
         assert_eq!(popcount_hex("f0a"), 6);
         let w = window(&CoreWindow { start_minute: 60, end_minute: 480, weekdays: vec![1, 7] });
         assert_eq!(w.weekdays, 0b100_0001);
+    }
+
+    #[test]
+    fn network_change_refreshes_aria2_only_when_bittorrent_needs_it() {
+        let settled = NETWORK_SETTLE;
+        // Same network as aria2 started on: nothing to do.
+        assert!(!network_refresh_due(Some(3), 3, true, settled, true));
+        // New network while a torrent wants to run: refresh.
+        assert!(network_refresh_due(Some(3), 4, true, settled, true));
+        // New network while everything BitTorrent is paused: wait for the resume.
+        assert!(!network_refresh_due(Some(3), 4, true, settled, false));
+        // Still settling, or offline, or no aria2: wait.
+        assert!(!network_refresh_due(Some(3), 4, true, Duration::from_secs(1), true));
+        assert!(!network_refresh_due(Some(3), 4, false, settled, true));
+        assert!(!network_refresh_due(None, 4, true, settled, true));
+    }
+
+    #[test]
+    fn discovery_watchdog_needs_a_long_silence_everywhere_and_backs_off() {
+        let stall = Some(DISCOVERY_STALL);
+        let short = Some(DISCOVERY_STALL - Duration::from_secs(1));
+        assert!(discovery_dead(stall, false, None, DISCOVERY_STALL));
+        // Not long enough, or no torrent waiting for peers.
+        assert!(!discovery_dead(short, false, None, DISCOVERY_STALL));
+        assert!(!discovery_dead(None, false, None, DISCOVERY_STALL));
+        // Another torrent has peers: discovery works, that swarm is just empty.
+        assert!(!discovery_dead(stall, true, None, DISCOVERY_STALL));
+        // Backoff since the last stall restart.
+        let backoff = DISCOVERY_STALL * 2;
+        assert!(!discovery_dead(stall, false, Some(backoff - Duration::from_secs(1)), backoff));
+        assert!(discovery_dead(stall, false, Some(backoff), backoff));
     }
 }

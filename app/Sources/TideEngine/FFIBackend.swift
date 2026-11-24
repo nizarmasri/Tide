@@ -413,6 +413,7 @@ enum Map {
         let boot = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "Macintosh HD"
         return CoreEnvironment(
             onBattery: e.onBattery, networkAvailable: e.networkAvailable, networkExpensive: e.networkExpensive,
-            bootVolumeName: boot, utcOffsetSeconds: Int64(TimeZone.current.secondsFromGMT()))
+            bootVolumeName: boot, utcOffsetSeconds: Int64(TimeZone.current.secondsFromGMT()),
+            networkGeneration: e.networkGeneration)
     }
 }

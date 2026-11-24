@@ -61,6 +61,9 @@ public struct SystemEnvironment: Equatable, Sendable {
     public var onBattery = false
     public var networkAvailable = true
     public var networkExpensive = false
+    /// Bumped when the Mac joins a different network or comes back from having none; the engine
+    /// restarts aria2 so BitTorrent peer discovery works on the new network.
+    public var networkGeneration: UInt64 = 0
     /// Mounted volumes: mount path → volume UUID (nil when unknown).
     public var mountedVolumes: [String: String] = [:]
     public init() {}
