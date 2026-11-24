@@ -51,7 +51,7 @@ Tide is a small native Mac app around aria2. The interface is SwiftUI, the engin
 
 ## Install
 
-1. Download `Tide-1.0.0-macOS.zip` from the [latest release](https://github.com/nizarmasri/Tide/releases/latest).
+1. Download `Tide-1.0.1-macOS.zip` from the [latest release](https://github.com/nizarmasri/Tide/releases/latest).
 2. Unzip it and drag **Tide** into your Applications folder.
 3. Open it. The first time, macOS says it can't verify the app because it isn't notarized. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only do this once.
 
