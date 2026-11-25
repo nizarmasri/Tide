@@ -5,8 +5,18 @@
 <h1 align="center">Tide</h1>
 
 <p align="center">
-  A fast, native download manager for Mac, built on aria2.<br>
-  Torrents, magnet links and direct downloads, right from your menu bar.
+  <strong>Find it. Download it. Done.</strong><br>
+  The fast, native torrent app for Mac. Search the big public torrent indexes from one bar,<br>
+  see the seeds and files before you download, and watch it all from your menu bar.
+</p>
+
+<p align="center">
+  <a href="https://github.com/nizarmasri/Tide/releases/latest"><img src="https://img.shields.io/github/v/release/nizarmasri/Tide?label=download&color=2563EB" alt="Download the latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-111111?logo=apple" alt="macOS 26 or later">
+  <img src="https://img.shields.io/badge/Apple%20silicon-native-111111" alt="Native on Apple silicon">
+  <img src="https://img.shields.io/badge/size-16%20MB-111111" alt="16 MB">
+  <img src="https://img.shields.io/badge/price-free-2ea44f" alt="Free">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/nizarmasri/Tide?color=111111" alt="MIT license"></a>
 </p>
 
 <p align="center">
@@ -18,17 +28,21 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/popover.png" width="760" alt="Tide's menu bar window in light and dark mode">
+  <img src="docs/images/search.png" width="900" alt="Searching for torrents in Tide: merged results with seeds, sizes and sources, and the files of the selected torrent">
 </p>
 
-## Why
+## Why Tide
 
-aria2 is one of the best download engines out there. It's fast, it does torrents and plain links, and it picks up where it left off. Driving it from the terminal gets old, though, and most apps built on top of it are heavy Electron wrappers.
+Getting a torrent usually means two apps and a lot of friction: a website full of pop-ups to find it, then a client that looks twenty years old to download it. Tide does both in one small, native Mac app.
 
-Tide is a small native Mac app around aria2. The interface is SwiftUI, the engine work happens in Rust, and aria2 is bundled inside the app so there's nothing else to install. The whole thing is a 16 MB download and sits at practically zero CPU when nothing is happening.
+- **Search is built in.** Type a name and press Return. Tide asks several big public indexes at once, merges the duplicates and gives you one clean list, sorted by seeds. No browser, no ads, no account.
+- **Look before you download.** See what's inside a torrent, how big it is, how many people are sharing it and where it was found. Tide picks the main video and skips the junk for you.
+- **Native and light.** SwiftUI and Rust around the aria2 engine, bundled in a 16 MB app that sits at practically zero CPU when nothing is happening. No Electron, nothing else to install.
 
 ## Features
 
+- **Search the big torrent indexes at once.** One search bar asks Knaben (which covers YTS, Nyaa and more), Bitsearch, Torrents-CSV and others in parallel. Copies of the same torrent are merged into one row with the best seed count, so the healthiest download is always on top. Free, with no account or API key. Open it with ⌘2, or ⇧⌘F from anywhere.
+- **See inside before you download.** Every result shows its files, size, seeds, peers and age. When Tide can get the torrent file, the Add window shows the real file list and the download starts right away, without waiting for peers to send it.
 - **Lives in the menu bar.** One click shows what's downloading, how fast, and when it'll be done. The full window is there when you want it.
 - **Add anything.** Drop in a `.torrent` file, paste a magnet link or a URL. Tide can also be your default app for magnet links and torrent files.
 - **Takes the movie, skips the junk.** For torrents, Tide selects the main video and leaves out samples, `.txt`/`.nfo` files and images. You can change the selection whenever you like.
@@ -37,10 +51,18 @@ Tide is a small native Mac app around aria2. The interface is SwiftUI, the engin
 - **Scheduling.** Set download hours, a slow mode for when you need the bandwidth, or start a download at a specific time.
 - **External drives just work.** Unplug the drive and its downloads wait. Plug it back in and they continue.
 - **Behaves on your Mac.** Keeps it awake only while something is downloading, can pause on battery or on a phone hotspot, and lets you know when a download finishes.
-- Pause and resume everything at once, per-download speed limits, file and peer details, search and keyboard shortcuts.
+- Pause and resume everything at once, per-download speed limits, file and peer details, filtering and keyboard shortcuts.
 
 <p align="center">
-  <img src="docs/images/window.png" width="900" alt="Tide's main window in light and dark mode">
+  <img src="docs/images/popover.png" width="760" alt="Tide's menu bar window in light and dark mode">
+  <br>
+  <sub>Everything at a glance from the menu bar, with search one click away.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/window.png" width="900" alt="Tide's Downloads view with live progress, seeds and peers">
+  <br>
+  <sub>Downloads and Search live in one window. Switch with the control in the toolbar.</sub>
 </p>
 
 <p align="center">
@@ -51,11 +73,13 @@ Tide is a small native Mac app around aria2. The interface is SwiftUI, the engin
 
 ## Install
 
-1. Download `Tide-1.0.1-macOS.zip` from the [latest release](https://github.com/nizarmasri/Tide/releases/latest).
+1. Download `Tide-1.1.0-macOS.zip` from the [latest release](https://github.com/nizarmasri/Tide/releases/latest).
 2. Unzip it and drag **Tide** into your Applications folder.
 3. Open it. The first time, macOS says it can't verify the app because it isn't notarized. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only do this once.
 
 Tide needs macOS 26 (Tahoe) or later on an Apple silicon Mac.
+
+Tide searches public indexes and doesn't host any files. Download only what you have the right to.
 
 ## Build from source
 
@@ -74,12 +98,13 @@ Run the tests with:
 ```sh
 (cd core && cargo test -p tide-core)
 (cd app && swift test)
+(cd app && TIDE_LIVE_SEARCH=1 swift test --filter LiveSearchTests)   # checks every search source live
 ```
 
 ### How it's put together
 
 - `core/` is the Rust engine. It runs aria2, talks to it over its JSON-RPC WebSocket API, reads and writes aria2's `.aria2` progress files, verifies pieces in parallel and keeps track of your downloads and schedule. It's exposed to Swift through UniFFI.
-- `app/` is the SwiftUI and AppKit app: the menu bar item, windows, settings and system integration.
+- `app/` is the SwiftUI and AppKit app: the menu bar item, windows, settings and system integration. Torrent search lives in `app/Sources/TideKit/Search`: one small adapter per index, merging by info hash, and plain `URLSession` with no extra dependencies.
 - `docs/DESIGN.md` has the design notes behind the interface.
 
 ## License
