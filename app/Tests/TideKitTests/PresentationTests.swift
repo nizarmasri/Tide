@@ -31,6 +31,17 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(dec(TideFormat.progress(68_190_000_000, of: 68_200_000_000)), "68.1 of 68.2 GB")
     }
 
+    /// 0.8% of 8 GB used to read "0.0 of 8.0 GB", as if nothing had arrived.
+    func testProgressNeverReadsZeroWhileDataExists() {
+        XCTAssertEqual(dec(TideFormat.progress(64_100_000, of: 8_000_000_000)), "64.1 MB of 8.0 GB")
+        XCTAssertEqual(dec(TideFormat.progress(99_000_000, of: 8_000_000_000)), "99 MB of 8.0 GB")
+        XCTAssertEqual(dec(TideFormat.progress(100_000_000, of: 8_000_000_000)), "0.1 of 8.0 GB")
+        XCTAssertEqual(dec(TideFormat.progress(1_500, of: 8_000_000_000)), "1.5 KB of 8.0 GB")
+        // No decimals at 100 or above: anything under 1 GB gets its own unit.
+        XCTAssertEqual(TideFormat.progress(400_000_000, of: 412_000_000_000), "400 MB of 412 GB")
+        XCTAssertEqual(TideFormat.progress(1_000_000_000, of: 412_000_000_000), "1 of 412 GB")
+    }
+
     func testBreakableInsertsZeroWidthSpaces() {
         let b = TideFormat.breakable("A.B-C_D")
         XCTAssertEqual(b, "A.\u{200B}B-\u{200B}C_\u{200B}D")

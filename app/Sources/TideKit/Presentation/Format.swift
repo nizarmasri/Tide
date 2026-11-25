@@ -62,9 +62,9 @@ public enum TideFormat {
         return bytes(bytesPerSecond) + "/s"
     }
 
-    /// "23.2 of 68.2 GB" when the units match, else "512 MB of 68.2 GB".
     /// "9.4 of 41.0 GB", "1.2 of 6.1 GB", "45 of 412 GB": both numbers in the total's unit with the
     /// same decimals — one below 100, none at 100 or above. Nothing done yet → just the total.
+    /// Too little to show in the total's unit gets its own: "64.1 MB of 8.0 GB", never "0.0 of 8.0 GB".
     public static func progress(_ done: Int64, of total: Int64) -> String {
         if done <= 0 || total <= 0 { return bytes(total) }
         let (tv, ti) = scale(total)
@@ -78,6 +78,7 @@ public enum TideFormat {
         f.maximumFractionDigits = decimals
         f.roundingMode = .halfUp
         let t = f.string(from: NSNumber(value: tv)) ?? "\(tv)"
+        if dv * pow(10, Double(decimals)) < 1 { return "\(bytes(done)) of \(t) \(units[ti])" }
         f.roundingMode = .down   // the done side never rounds up to the total
         let d = f.string(from: NSNumber(value: dv)) ?? "\(dv)"
         return "\(d) of \(t) \(units[ti])"
