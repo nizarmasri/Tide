@@ -19,11 +19,54 @@ final class ClipboardStatus {
     }
 }
 
+/// The two views of the main window, switched in the toolbar (⌘1 / ⌘2).
+enum MainTab: String, CaseIterable, Identifiable {
+    case downloads = "Downloads", search = "Search"
+    var id: String { rawValue }
+}
+
+/// One torrent search, alive while the main window is open: the query, results, selection and
+/// the files loaded for it. Nothing in it touches the network until the user presses Return.
+@MainActor
+@Observable
+final class SearchSession {
+    let search: TorrentSearch
+    let details: TorrentDetails
+    var text = ""
+    var selection: SearchResult.ID?
+    var category: SearchCategory?
+    var sortOrder = [KeyPathComparator(\SearchResult.seeders, order: .reverse)]
+    var inspectorShown = true
+    /// Bumped to put the cursor in the search bar.
+    var focusRequest = 0
+
+    init(search: TorrentSearch, details: TorrentDetails) {
+        self.search = search
+        self.details = details
+    }
+
+    convenience init(model: AppModel) {
+        self.init(search: TorrentSearch(), details: TorrentDetails { await model.inspect($0) })
+    }
+}
+
+extension AppModel {
+    /// Downloaded .torrent files that an open Add window still needs.
+    var pendingTorrentFiles: Set<URL> {
+        Set(addRequests.values.joined().compactMap { input in
+            if case .torrentFile(let url) = input { return url } else { return nil }
+        })
+    }
+}
+
 /// UI state of the Downloads window, shared with the main menu so ⌘. / ⌘I etc. act on the
 /// current selection.
 @MainActor
 @Observable
 final class MainWindowState {
+    var tab: MainTab = .downloads
+    /// Created the first time the Search view opens; dropped when the window closes.
+    private(set) var searchSession: SearchSession?
     var selection = Set<TaskID>()
     var inspectorShown = false
     var compactRows = false
@@ -39,6 +82,33 @@ final class MainWindowState {
 
     func selectedTasks(in model: AppModel) -> [DownloadTask] {
         model.snapshot.tasks.filter { selection.contains($0.id) }
+    }
+
+    func show(_ tab: MainTab, model: AppModel) {
+        if tab == .search, searchSession == nil {
+            TorrentDetails.removeTemporaryFiles(keeping: model.pendingTorrentFiles)
+            searchSession = SearchSession(model: model)
+        }
+        self.tab = tab
+    }
+
+    /// Switches to Search with the cursor in the search bar.
+    func focusSearch(model: AppModel) {
+        show(.search, model: model)
+        searchSession?.focusRequest += 1
+    }
+
+    /// The window closed: forget the search and the .torrent files it downloaded.
+    func endSearch(model: AppModel) {
+        searchSession = nil
+        tab = .downloads
+        TorrentDetails.removeTemporaryFiles(keeping: model.pendingTorrentFiles)
+    }
+
+    /// Previews and renders: show a prepared search.
+    func showSearch(_ session: SearchSession) {
+        searchSession = session
+        tab = .search
     }
 
     init(compactRows: Bool = UserDefaults.standard.bool(forKey: "compactRows")) {
@@ -121,6 +191,7 @@ class WindowRouter {
     func showAdd(_ inputs: [AddInput]) {}
     func showAddLink() {}
     func openTorrentFile() {}
+    func showSearch() {}
     func showImport(_ url: URL? = nil, candidates: [ImportCandidate]? = nil) {}
     func showSettings() {}
     func showWelcome() {}

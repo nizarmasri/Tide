@@ -134,6 +134,7 @@ final class StatusItemController: NSObject {
             if inputs.isEmpty { self.services.router.showAddLink() } else { self.model.requestAdd(inputs) }
         }
         menu.addItem(paste)
+        menu.addItem(item("Search Torrents") { [weak self] in self?.services.router.showSearch() })
         menu.addItem(item("Open Downloads Window") { [weak self] in self?.services.router.showMain() })
         menu.addItem(.separator())
         menu.addItem(item("Settings…") { [weak self] in self?.services.router.showSettings() })

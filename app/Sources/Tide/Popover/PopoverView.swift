@@ -82,6 +82,12 @@ struct PopoverView: View {
                 }
             }
             Spacer(minLength: 8)
+            Button { router.closePopover(); router.showSearch() } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(CircleIconButtonStyle())
+            .help("Search Torrents")
+            .accessibilityLabel("Search Torrents")
             AddMenuButton()
             if !s.isEmpty {
                 Button {

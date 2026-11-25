@@ -124,6 +124,28 @@ enum PreviewRenderer {
             settings("\(50 + i)-settings-\(pane.rawValue.lowercased())-\(L)", pane, look)
         }
 
+        // Search
+        let results = PreviewFixtures.searchResults
+        let tears = results[0], ubuntu = results[1]
+        searchWindow("70-search-empty-\(L)", .preview(query: "", results: [], phase: .idle), look)
+        searchWindow("71-search-results-\(L)", .preview(query: "open movie", results: results), look, text: "open movie")
+        searchWindow("72-search-inspector-full-\(L)", .preview(query: "open movie", results: results), look,
+                     text: "open movie", select: tears.id, files: .full(PreviewFixtures.torrentPreview))
+        searchWindow("73-search-inspector-listed-\(L)", .preview(query: "ubuntu", results: results), look,
+                     text: "ubuntu", select: ubuntu.id,
+                     files: .listed([TaskFile(index: 1, path: "ubuntu-26.04-desktop-amd64.iso", length: 0, selected: true, tag: .other)]))
+        searchWindow("74-search-partial-failure-\(L)",
+                     .preview(query: "open movie", results: results, failures: [.bitsearch: .rateLimited, .torrentscsv: .unavailable]),
+                     look, text: "open movie", select: results[2].id, files: .unavailable)
+        searchWindow("75-search-category-\(L)", .preview(query: "open movie", results: results), look,
+                     text: "open movie", category: .movies)
+        searchWindow("76-search-no-results-\(L)", .preview(query: "zzqqxx", results: []), look, text: "zzqqxx")
+        searchWindow("77-search-unreachable-\(L)",
+                     .preview(query: "ubuntu", results: [], failures: Dictionary(uniqueKeysWithValues:
+                        SearchSourceID.allCases.map { ($0, SearchFailure.unavailable) })), look, text: "ubuntu")
+        searchWindow("78-search-loading-files-\(L)", .preview(query: "ubuntu", results: results), look,
+                     text: "ubuntu", select: ubuntu.id, files: .loading)
+
         // Dialogs
         alert("60-dialog-remove-\(L)", RemoveFlow.makeAlert(tasks: [PreviewFixtures.movie]), look)
         alert("61-dialog-remove-trash-completed-\(L)", RemoveFlow.makeTrashAlert(tasks: [PreviewFixtures.done]), look)
@@ -206,7 +228,7 @@ enum PreviewRenderer {
         captureView(container, name: name, look: look, padding: 24)
     }
 
-    private static func main(_ name: String, _ snap: EngineSnapshot, _ look: Look, size: NSSize = NSSize(width: 880, height: 560),
+    private static func main(_ name: String, _ snap: EngineSnapshot, _ look: Look, size: NSSize = NSSize(width: 980, height: 600),
                              compact: Bool = false, select: Set<TaskID> = [], tab: MainWindowState.InspectorTab = .info) {
         let s = services(snap)
         s.windowState.compactRows = compact
@@ -220,8 +242,42 @@ enum PreviewRenderer {
                          backing: .buffered, defer: false)
         w.contentViewController = host
         w.setContentSize(size)
-        w.title = "Downloads"
+        w.title = "Tide"
         w.subtitle = WindowSubtitle.text(snap)
+        w.toolbarStyle = .unified
+        captureWindow(w, name: name, look: look)
+    }
+
+    private static func searchWindow(_ name: String, _ search: TorrentSearch, _ look: Look, text: String = "",
+                                     select: String? = nil, files: TorrentDetails.Files? = nil,
+                                     category: SearchCategory? = nil) {
+        let s = services(PreviewFixtures.mixedToday)
+        let details = TorrentDetails(transport: { _ in throw URLError(.notConnectedToInternet) }) { _ in
+            PreviewFixtures.torrentPreview
+        }
+        if let select, let files { details.preload(files, for: select) }
+        let session = SearchSession(search: search, details: details)
+        session.text = text
+        session.selection = select
+        session.category = category
+        s.windowState.showSearch(session)
+        let host = NSHostingController(rootView: styled(MainWindowView().tideEnvironment(s), look))
+        host.sceneBridgingOptions = [.toolbars, .title]
+        let size = NSSize(width: 980, height: 600)
+        let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                         backing: .buffered, defer: false)
+        w.contentViewController = host
+        w.setContentSize(size)
+        w.title = "Tide"
+        if search.phase == .done, !search.allFailed {
+            var sub = search.summary
+            if let category {
+                sub = "\(search.results.filter { $0.category == category }.count) of \(sub)"
+            }
+            if let note = search.failureNote { sub += " · \(note)" }
+            w.subtitle = sub
+        }
         w.toolbarStyle = .unified
         captureWindow(w, name: name, look: look)
     }

@@ -296,15 +296,17 @@ public struct AddPreview: Identifiable, Equatable, Sendable {
     public var duplicateOf: TaskID?
     public var existing: ExistingProgress? // data + .aria2 found at the chosen destination
     public var problem: InputProblem?
+    /// Lowercase hex info hash, for torrents and magnets.
+    public var infoHash: String?
 
     public init(id: UUID = UUID(), input: AddInput, kind: TaskKind, name: String, totalBytes: Int64?,
                 files: [TaskFile] = [], smart: SmartSummary? = nil, metadataPending: Bool = false,
                 metadataPeers: Int = 0, duplicateOf: TaskID? = nil, existing: ExistingProgress? = nil,
-                problem: InputProblem? = nil) {
+                problem: InputProblem? = nil, infoHash: String? = nil) {
         self.id = id; self.input = input; self.kind = kind; self.name = name; self.totalBytes = totalBytes
         self.files = files; self.smart = smart; self.metadataPending = metadataPending
         self.metadataPeers = metadataPeers; self.duplicateOf = duplicateOf; self.existing = existing
-        self.problem = problem
+        self.problem = problem; self.infoHash = infoHash
     }
 
     public var selectedBytes: Int64 {
@@ -429,6 +431,9 @@ public struct TideSettings: Equatable, Codable, Sendable {
     public var lpd = true
     public var preferEncryption = false
     public var extraTrackers = ""
+    // Search. Optional so settings saved before these existed still decode; nil means the default.
+    public var searchDisabledSources: [String]? = nil
+    public var searchShowAdult: Bool? = nil
     // Engine
     public var advancedOptions = ""
     // First run

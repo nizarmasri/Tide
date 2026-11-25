@@ -3,16 +3,18 @@ import SwiftUI
 import TideKit
 
 /// Outline of torrent files with tri-state folder checkboxes (Add window and Files inspector).
+/// Read-only (`editable: false`, Search window) hides the checkboxes and unknown sizes.
 struct FileTreeView: View {
     var files: [TaskFile]
     @Binding var selected: Set<Int>
     var showProgress: Bool = false
+    var editable: Bool = true
 
     var body: some View {
         let tree = FileNode.tree(files)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(tree) { node in
-                FileNodeRow(node: node, selected: $selected, showProgress: showProgress, depth: 0)
+                FileNodeRow(node: node, selected: $selected, showProgress: showProgress, editable: editable, depth: 0)
             }
         }
     }
@@ -22,6 +24,7 @@ private struct FileNodeRow: View {
     var node: FileNode
     @Binding var selected: Set<Int>
     var showProgress: Bool
+    var editable: Bool
     var depth: Int
     @State private var expanded = true
 
@@ -29,7 +32,8 @@ private struct FileNodeRow: View {
         if node.isFolder {
             DisclosureGroup(isExpanded: $expanded) {
                 ForEach(node.children) { child in
-                    FileNodeRow(node: child, selected: $selected, showProgress: showProgress, depth: depth + 1)
+                    FileNodeRow(node: child, selected: $selected, showProgress: showProgress, editable: editable,
+                                depth: depth + 1)
                 }
             } label: {
                 rowContent
@@ -55,23 +59,27 @@ private struct FileNodeRow: View {
         let isJunk = tag?.junkLabel != nil
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Group {
-                    if let f = node.file {
-                        Toggle("", isOn: Binding(get: { selected.contains(f.index) },
-                                                 set: { on in if on { selected.insert(f.index) } else { selected.remove(f.index) } }))
-                    } else {
-                        Toggle(sources: leafBindings, isOn: \.self) { EmptyView() }
+                if editable {
+                    Group {
+                        if let f = node.file {
+                            Toggle("", isOn: Binding(get: { selected.contains(f.index) },
+                                                     set: { on in if on { selected.insert(f.index) } else { selected.remove(f.index) } }))
+                        } else {
+                            Toggle(sources: leafBindings, isOn: \.self) { EmptyView() }
+                        }
                     }
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
                 }
-                .toggleStyle(.checkbox)
-                .labelsHidden()
                 FileIconView(image: FileIcons.icon(forName: node.name, isFolder: node.isFolder), size: 16)
                 NameWithTag(name: node.name, tag: tag?.junkLabel, dim: isJunk)
-                Text(TideFormat.bytes(node.totalBytes))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 64, alignment: .trailing)
+                if editable || node.totalBytes > 0 {
+                    Text(TideFormat.bytes(node.totalBytes))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(width: 64, alignment: .trailing)
+                }
             }
             if showProgress, isSelected, node.totalBytes > 0 {
                 let f = Double(node.completedBytes) / Double(node.totalBytes)
@@ -88,7 +96,8 @@ private struct FileNodeRow: View {
         .frame(minHeight: 24)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(node.name)
-        .accessibilityValue("\(isSelected ? "Selected" : "Not selected"), \(TideFormat.spokenBytes(node.totalBytes))")
+        .accessibilityValue(editable ? "\(isSelected ? "Selected" : "Not selected"), \(TideFormat.spokenBytes(node.totalBytes))"
+                                     : TideFormat.spokenBytes(node.totalBytes))
     }
 }
 

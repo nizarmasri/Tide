@@ -392,6 +392,23 @@ struct BitTorrentPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Section {
+                ForEach(SearchSourceID.allCases) { source in
+                    Toggle(isOn: Binding(get: { model.settings.searchSources.contains(source) },
+                                         set: { model.settings.setSearchSource(source, enabled: $0) })) {
+                        Text(source.name)
+                        Text(source.coverage)
+                    }
+                }
+                Toggle("Show adult results", isOn: Binding(get: { model.settings.showAdultResults },
+                                                           set: { model.settings.searchShowAdult = $0 ? true : nil }))
+            } header: {
+                Text("Search")
+            } footer: {
+                Text("Searches go to the sources you turn on. File lists can also come from itorrents.net.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

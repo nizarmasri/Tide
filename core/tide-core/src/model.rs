@@ -199,6 +199,8 @@ pub struct CorePreview {
     pub existing_completed: Option<i64>,
     pub existing_fraction: Option<f64>,
     pub problem: Option<CoreInputProblem>,
+    /// Lowercase hex v1 info hash, for torrents and magnets.
+    pub info_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]

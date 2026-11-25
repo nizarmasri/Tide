@@ -31,6 +31,8 @@ enum MainMenu {
         file.addItem(item("Open Torrent File…", #selector(AppDelegate.openTorrent(_:)), "o", target: target))
         file.addItem(item("Import Existing Download…", #selector(AppDelegate.importExisting(_:)), "i", [.command, .shift], target: target))
         file.addItem(.separator())
+        file.addItem(item("Search Torrents", #selector(AppDelegate.searchTorrents(_:)), "f", [.command, .shift], target: target))
+        file.addItem(.separator())
         file.addItem(item("Close", #selector(NSWindow.performClose(_:)), "w"))
 
         // Edit
@@ -47,6 +49,9 @@ enum MainMenu {
 
         // View
         let view = submenu(main, "View")
+        view.addItem(item("Downloads", #selector(AppDelegate.showDownloadsView(_:)), "1", target: target))
+        view.addItem(item("Search", #selector(AppDelegate.showSearchView(_:)), "2", target: target))
+        view.addItem(.separator())
         view.addItem(item("Compact Rows", #selector(AppDelegate.toggleCompact(_:)), target: target))
         view.addItem(item("Show Info", #selector(AppDelegate.toggleInspector(_:)), "i", target: target))
         view.addItem(.separator())

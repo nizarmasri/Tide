@@ -1789,7 +1789,7 @@ impl Engine {
         let dir = PathBuf::from(destination);
         let blank = |kind, name: String, problem| CorePreview {
             kind, name, total_bytes: None, files: vec![], smart: None, metadata_pending: false, metadata_peers: 0,
-            duplicate_of: None, existing_completed: None, existing_fraction: None, problem,
+            duplicate_of: None, existing_completed: None, existing_fraction: None, problem, info_hash: None,
         };
         match source {
             CoreSource::TorrentFile { path } => {
@@ -1811,6 +1811,7 @@ impl Engine {
                     existing_completed: existing.map(|e| e.0),
                     existing_fraction: existing.map(|e| e.1),
                     problem: None,
+                    info_hash: Some(t.info_hash.clone()),
                 }
             }
             CoreSource::Link { link } => {
@@ -1819,6 +1820,7 @@ impl Engine {
                     let existing = Self::existing_at(&dir, &m.info_hash, None, &[]);
                     let mut p = blank(CoreKind::Magnet, m.name.clone().unwrap_or_else(|| "Magnet link".into()), None);
                     p.metadata_pending = true;
+                    p.info_hash = Some(m.info_hash.clone());
                     p.duplicate_of = Self::duplicate_of(&st, Some(&m.info_hash), None);
                     p.existing_completed = existing.map(|e| e.0);
                     p.existing_fraction = existing.map(|e| e.1);
@@ -2045,6 +2047,35 @@ mod tests {
         assert_eq!(popcount_hex("f0a"), 6);
         let w = window(&CoreWindow { start_minute: 60, end_minute: 480, weekdays: vec![1, 7] });
         assert_eq!(w.weekdays, 0b100_0001);
+    }
+
+    #[test]
+    fn inspect_reports_the_info_hash() {
+        let support = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let e = Engine::new(CoreConfig {
+            aria2_path: String::new(),
+            support_dir: support.path().to_string_lossy().into(),
+            log_dir: logs.path().to_string_lossy().into(),
+            app_pid: std::process::id(),
+        });
+        let dir = support.path().to_string_lossy().into_owned();
+
+        let data = vec![7u8; 40_000];
+        let bytes = torrent::make_torrent("Show", &[("a.mkv", 30_000), ("b.txt", 10_000)], 16_384, &data, &[]);
+        let expected = torrent::parse(&bytes).unwrap().info_hash;
+        let path = support.path().join("x.torrent");
+        std::fs::write(&path, &bytes).unwrap();
+        let p = e.inspect(CoreSource::TorrentFile { path: path.to_string_lossy().into() }, &dir);
+        assert_eq!(p.info_hash.as_deref(), Some(expected.as_str()));
+        assert_eq!(p.files.len(), 2);
+
+        let magnet = "magnet:?xt=urn:btih:2C6B6858D61DA9543D4231A71DB4B1C9264B0685&dn=Ubuntu";
+        let p = e.inspect(CoreSource::Link { link: magnet.into() }, &dir);
+        assert_eq!(p.info_hash.as_deref(), Some("2c6b6858d61da9543d4231a71db4b1c9264b0685"));
+
+        let p = e.inspect(CoreSource::Link { link: "https://example.com/file.zip".into() }, &dir);
+        assert_eq!(p.info_hash, None);
     }
 
     #[test]

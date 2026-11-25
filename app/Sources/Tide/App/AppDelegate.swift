@@ -125,6 +125,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func addLink(_ sender: Any?) { windows.showAddLink() }
     @objc func openTorrent(_ sender: Any?) { windows.openTorrentFile() }
     @objc func importExisting(_ sender: Any?) { windows.showImport() }
+    @objc func searchTorrents(_ sender: Any?) { windows.showSearch() }
+    @objc func showDownloadsView(_ sender: Any?) { windows.showMain(); state.show(.downloads, model: model) }
+    @objc func showSearchView(_ sender: Any?) { windows.showSearch() }
     @objc func showDownloads(_ sender: Any?) { windows.showMain() }
 
     @objc func pauseSelected(_ sender: Any?) { model.pause(selected.filter { $0.phase.isPausable }.map(\.id)) }
@@ -154,6 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc func findInDownloads(_ sender: Any?) {
         windows.showMain()
+        // In the Search view, ⌘F goes to its search bar (there is no filter field there).
+        if state.tab == .search { state.focusSearch(model: model); return }
         if let item = NSApp.keyWindow?.toolbar?.items.compactMap({ $0 as? NSSearchToolbarItem }).first {
             item.beginSearchInteraction()
         }
@@ -177,6 +182,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(resumeSelected): return mainIsKey && sel.contains { !$0.phase.isPausable && !$0.phase.isFinished }
         case #selector(pauseAll): return services.model.anythingMoving
         case #selector(resumeAll): return services.model.snapshot.inProgress.contains { !$0.phase.isActive }
+        case #selector(showDownloadsView):
+            item.state = windows.isMainWindowVisible && state.tab == .downloads ? .on : .off; return true
+        case #selector(showSearchView):
+            item.state = windows.isMainWindowVisible && state.tab == .search ? .on : .off; return true
         case #selector(toggleSlowMode):
             item.state = services.model.slowMode ? .on : .off; return true
         case #selector(toggleCompact):

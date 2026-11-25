@@ -157,6 +157,14 @@ public enum TideFormat {
         return "\(f.string(from: date)) at \(t)"
     }
 
+    /// "3 days ago", "2 years ago".
+    public static func relative(_ date: Date, now: Date = Date(),
+                                style: RelativeDateTimeFormatter.UnitsStyle = .full) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = style
+        return f.localizedString(for: date, relativeTo: now)
+    }
+
     /// "Starts at 01:00" (today), "Starts tomorrow at 01:00", "Starts Nov 24 at 01:00".
     public static func startsAt(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let t = time(date, calendar: calendar)

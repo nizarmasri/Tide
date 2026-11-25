@@ -38,13 +38,13 @@ final class WindowManager: WindowRouter {
         let root = MainWindowView().tideEnvironment(services)
         let host = NSHostingController(rootView: root)
         host.sceneBridgingOptions = [.toolbars, .title]
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 560),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 600),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         w.contentViewController = host
-        w.setContentSize(NSSize(width: 880, height: 560))
+        w.setContentSize(NSSize(width: 980, height: 600))
         w.contentMinSize = NSSize(width: 640, height: 400)
-        w.title = "Downloads"
+        w.title = "Tide"
         w.toolbarStyle = .unified
         w.isReleasedWhenClosed = false
         w.setFrameAutosaveName("TideDownloads")
@@ -55,6 +55,7 @@ final class WindowManager: WindowRouter {
         obs.onClose = { [weak self] in
             guard let self else { return }
             self.services.model.surfaceDisappeared("main")
+            self.services.windowState.endSearch(model: self.services.model)
             NSApp.setActivationPolicy(.accessory)
         }
         obs.onOcclusion = { [weak self] visible in
@@ -67,6 +68,14 @@ final class WindowManager: WindowRouter {
     }
 
     var isMainWindowVisible: Bool { mainWindow?.isVisible ?? false }
+
+    // MARK: Search
+
+    /// The Search view of the main window, with the cursor in its search bar.
+    override func showSearch() {
+        showMain()
+        services.windowState.focusSearch(model: services.model)
+    }
 
     // MARK: Add
 
@@ -197,7 +206,12 @@ final class WindowCloseObserver: NSObject, NSWindowDelegate {
     var onClose: () -> Void = {}
     var onOcclusion: (Bool) -> Void = { _ in }
     var onKey: (Bool) -> Void = { _ in }
-    private var tokens: [NSObjectProtocol] = []
+    // Block-based observers stay registered until they are removed.
+    nonisolated(unsafe) private var tokens: [NSObjectProtocol] = []
+
+    deinit {
+        tokens.forEach(NotificationCenter.default.removeObserver)
+    }
 
     init(window: NSWindow) {
         super.init()

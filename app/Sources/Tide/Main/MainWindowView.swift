@@ -2,9 +2,39 @@ import AppKit
 import SwiftUI
 import TideKit
 
-/// The Downloads window (DESIGN.md §5): no sidebar, two sections, inspector, 4 toolbar buttons
-/// plus search.
+/// The main window (DESIGN.md §5): Downloads and Search, switched by a segmented control in the
+/// middle of the toolbar. Each view brings its own toolbar items and inspector; only one search
+/// field is ever on screen, so filtering downloads and searching for torrents never share a bar.
 struct MainWindowView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(MainWindowState.self) private var state
+
+    var body: some View {
+        Group {
+            switch state.tab {
+            case .downloads:
+                DownloadsListView()
+            case .search:
+                if let session = state.searchSession { SearchPane(session: session) } else { Color.clear }
+            }
+        }
+        .frame(minWidth: 640, minHeight: 400)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Picker("View", selection: Binding(get: { state.tab }, set: { state.show($0, model: model) })) {
+                    ForEach(MainTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Downloads (⌘1) or Search for torrents (⌘2)")
+            }
+        }
+    }
+}
+
+/// Downloads (DESIGN.md §5): no sidebar, two sections, inspector, 4 toolbar buttons plus a filter.
+struct DownloadsListView: View {
     @Environment(AppModel.self) private var model
     @Environment(EtaEstimator.self) private var eta
     @Environment(MainWindowState.self) private var state
@@ -35,12 +65,11 @@ struct MainWindowView: View {
                 list(inProgress: inProgress, finished: finished)
             }
         }
-        .frame(minWidth: 640, minHeight: 400)
         .acceptsDownloadDrops(model)
-        .navigationTitle("Downloads")
+        .navigationTitle("Tide")
         .navigationSubtitle(WindowSubtitle.text(snap))
         .toolbar { toolbar }
-        .searchable(text: $state.search, placement: .toolbar, prompt: "Search")
+        .searchable(text: $state.search, placement: .toolbar, prompt: "Filter Downloads")
         .modifier(InspectorPlacement(shown: $state.inspectorShown, inline: inlineInspector))
     }
 

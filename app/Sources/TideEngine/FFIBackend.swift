@@ -367,7 +367,8 @@ enum Map {
             smart: p.smart.map(smart), metadataPending: p.metadataPending, metadataPeers: Int(p.metadataPeers),
             duplicateOf: p.duplicateOf.map(TaskID.init),
             existing: p.existingCompleted.map { ExistingProgress(completedBytes: $0, fraction: p.existingFraction ?? 0) },
-            problem: p.problem.map { $0 == .unreadableTorrent ? .unreadableTorrent : .invalidLink })
+            problem: p.problem.map { $0 == .unreadableTorrent ? .unreadableTorrent : .invalidLink },
+            infoHash: p.infoHash)
     }
 
     static func importCandidate(_ c: CoreImport) -> ImportCandidate {

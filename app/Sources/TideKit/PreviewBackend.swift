@@ -138,11 +138,12 @@ public enum PreviewFixtures {
         input: .torrentFile(movies.appendingPathComponent("209c8226b299b308beaf2b9cd3fb49212dbd13ec.torrent")),
         kind: .torrent, name: "Tears.of.Steel.2012.4K.HDR",
         totalBytes: 72_814_624_030, files: movieFiles.map { var f = $0; f.completedLength = 0; return f },
-        smart: movieSmart)
+        smart: movieSmart, infoHash: "209c8226b299b308beaf2b9cd3fb49212dbd13ec")
 
     public static let magnetPreview = AddPreview(
         input: .link("magnet:?xt=urn:btih:209C8226B299B308BEAF2B9CD3FB49212DBD13EC"), kind: .magnet,
-        name: "Tears of Steel 2012 4K HDR", totalBytes: nil, metadataPending: true, metadataPeers: 6)
+        name: "Tears of Steel 2012 4K HDR", totalBytes: nil, metadataPending: true, metadataPeers: 6,
+        infoHash: "209c8226b299b308beaf2b9cd3fb49212dbd13ec")
 
     public static let urlPreview = AddPreview(
         input: .link("https://cdimage.ubuntu.com/ubuntu-26.04-desktop-arm64.iso"), kind: .http,

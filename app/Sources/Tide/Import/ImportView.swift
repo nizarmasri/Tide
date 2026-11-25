@@ -151,7 +151,7 @@ struct ImportView: View {
             checkRow(ok: c.progressFile != nil, title: "Progress file",
                      detail: c.progressFile.map { pf in
                          var s = pf.lastPathComponent
-                         if let at = c.progressSavedAt { s += " · saved \(relative(at))" }
+                         if let at = c.progressSavedAt { s += " · saved \(TideFormat.relative(at))" }
                          return s
                      } ?? missingProgressText(c),
                      warn: c.progressFile == nil)
@@ -204,12 +204,6 @@ struct ImportView: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func relative(_ d: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .full
-        return f.localizedString(for: d, relativeTo: Date())
     }
 
     private func filesSummary(_ c: ImportCandidate) -> String {

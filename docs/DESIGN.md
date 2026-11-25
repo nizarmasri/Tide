@@ -37,6 +37,7 @@ Design notes for Tide. Points, SF Symbols names and SwiftUI components are the s
 | Popover | Daily use: check, add, pause | Active tasks, last 3 completed, Pause/Resume All, Add, Slow Mode, one contextual banner, free space | Files, peers, settings, selection |
 | Main window | Manage | Full list in 2 sections, inspector, multi-select, reorder, search | Sidebar, filters, charts |
 | Add window | Intake | Item preview, smart file selection, destination, start timing | Per-task advanced options (they live in the inspector) |
+| Main window ▸ Search | Find | Results from free public indexes, merged by info hash; files and details of one | Settings, anything that runs before the user presses Return |
 | Settings | Policy | 6 panes | Live task data |
 
 **Sidebar: no.** Two list sections ("In Progress", "Completed") plus search replace categories. There is no filter or sort UI; the list order is the queue order.
@@ -73,6 +74,7 @@ Design notes for Tide. Points, SF Symbols names and SwiftUI components are the s
    - DHT, Peer Exchange and Local Peer Discovery toggles
    - Prefer encrypted connections
    - Extra trackers, inside a disclosure
+   - Search: one toggle per source (all on), "Show adult results" (off), and the footnote "Searches go to the sources you turn on." 
 6. **Engine** (`gearshape.2`)
    - Status row: green dot, "Running · aria2 1.37.0"
    - "Progress saved every 10 seconds" (deliberate reassurance for the power-cut user)
@@ -87,7 +89,7 @@ Design notes for Tide. Points, SF Symbols names and SwiftUI components are the s
 - Use an AppKit `NSStatusItem`, not `MenuBarExtra`: the icon needs drag-and-drop and a right-click menu.
 - A transparent `NSDraggingDestination` subview over the button accepts `.fileURL`, `.URL` and `.string`. A hovering drag highlights the button; a drop opens the Add window.
 - Left-click toggles the popover.
-- Right-click or Control-click opens an `NSMenu`: Pause All / Resume All, Slow Mode, Add from Clipboard, Open Downloads Window, Settings…, Quit.
+- Right-click or Control-click opens an `NSMenu`: Pause All / Resume All, Slow Mode, Add from Clipboard, Search Torrents, Open Downloads Window, Settings…, Quit.
 
 **Glyph**
 - A custom-drawn template `NSImage` (`isTemplate = true`) on an 18×18 canvas. It's the app icon reduced to a ring plus a centre glyph, and it never uses colour.
@@ -160,6 +162,7 @@ Design notes for Tide. Points, SF Symbols names and SwiftUI components are the s
 
 - Line 2: 11 regular, secondary. A summary such as "2 downloading · done in 1 hr 12 min"; it appends "· Slow Mode" while slow mode is on.
 - **Buttons** (28×28 hit area, 15pt medium symbols):
+  - `magnifyingglass`: Search Torrents, which opens the main window's Search view with the cursor in its search bar.
   - `plus`: a `Menu` with Add Link…, Open Torrent File…, Import Existing Download…
   - The go/stop toggle: `pause.fill` "Pause All" while data is moving; otherwise `play.fill` "Resume All", or "Start Now" outside download hours.
 
@@ -215,12 +218,13 @@ Styling: minimum height 36, radius 10, fill at 12% of the state colour (18% in d
 ## 5. Main window
 
 **Structure**
-- `Window("Downloads", id: "main")`, default 880×560, minimum 640×400.
-- Content: `List(selection: Set<ID>)` in `.inset` style, plus `.inspector(isPresented:)` with `.inspectorColumnWidth(min: 260, ideal: 300, max: 380)`.
+- One window, titled "Tide", default 980×600, minimum 640×400. It has two views, **Downloads** and **Search**, switched by a segmented control at the leading edge of the toolbar (⌘1 / ⌘2). Leading, not centred: a centred control squeezes the toolbar so much that the filter field collapses to an icon.
+- Each view brings its own toolbar items and inspector. Only one search field is ever on screen: Downloads has the small toolbar filter, Search has a large search bar in its content. Filtering your downloads and searching for torrents never share a field.
+- Downloads content: `List(selection: Set<ID>)` in `.inset` style, plus `.inspector(isPresented:)` with `.inspectorColumnWidth(min: 260, ideal: 300, max: 380)`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ ●●●  Downloads                          [+▾] [⏸] [tortoise]  [Search] [▯]   │
+│ ●●● [Downloads|Search] Tide       [+▾] [⏸] [tortoise] [▯] [Filter Downloads]│
 │      2 downloading · 24.6 MB/s                                             │
 ├───────────────────────────────────────────────────────┬─────────────────────┤
 │ In Progress                                           │ Inspector (300)     │
@@ -233,15 +237,15 @@ Styling: minimum height 36, radius 10, fill at 12% of the state colour (18% in d
 ```
 
 **Toolbar** (system glass grouping)
-- Title "Downloads". Live `.navigationSubtitle`: "2 downloading · 24.6 MB/s", plus "· ↑ 1.2 MB/s" only while uploading and "· Slow Mode" while it's on.
+- Leading: the Downloads | Search control. Title "Tide". Live `.navigationSubtitle`: "2 downloading · 24.6 MB/s", plus "· ↑ 1.2 MB/s" only while uploading and "· Slow Mode" while it's on.
 - Trailing items, in order:
   1. `plus`: a `Menu` whose primary action is Add Link…, with Open Torrent File… and Import Existing Download…
   2. Pause All / Resume All toggle (`pause.fill` / `play.fill`)
   3. Slow Mode (`tortoise` / `tortoise.fill`)
   4. `ToolbarSpacer(.fixed)`
-  5. `.searchable` (toolbar placement)
+  5. `.searchable` (toolbar placement), prompt "Filter Downloads"
   6. Inspector toggle (`sidebar.trailing`)
-- That's 4 buttons plus search. Nothing else.
+- That's 4 buttons plus the filter, besides the view control. Nothing else.
 
 **List**
 - **In Progress** holds all incomplete tasks in queue order. Drag to reorder (`.onMove`), which maps to aria2 `changePosition`.
@@ -310,6 +314,8 @@ Styling: minimum height 36, radius 10, fill at 12% of the state colour (18% in d
 | ⌘N | Add Link… |
 | ⌘O | Open Torrent File… |
 | ⇧⌘I | Import Existing Download… |
+| ⇧⌘F | Search Torrents (Search view, cursor in the search bar) |
+| ⌘1 / ⌘2 | Downloads / Search view |
 | ⌘V | Paste a link (list focused) |
 | ⌘. / ⌘/ | Pause / Resume selected (Transmission convention) |
 | ⌥⌘. / ⌥⌘/ | Pause All / Resume All |
@@ -320,7 +326,7 @@ Styling: minimum height 36, radius 10, fill at 12% of the state colour (18% in d
 | ⌘C | Copy magnet or link |
 | ⌥⌘↑ / ⌥⌘↓ | Move up / down in the queue |
 | ⌫ / ⌘⌫ | Remove… / Remove and Move to Trash… |
-| ⌘F | Search |
+| ⌘F | The visible field: Filter Downloads, or the Search bar in the Search view |
 | ⌘, | Settings |
 | ⌘W | Close window |
 
@@ -392,6 +398,35 @@ Styling: minimum height 36, radius 10, fill at 12% of the state colour (18% in d
 - The primary control is a prominent `Menu` with a primary action. Default action: Download Now. Menu items: Download At…, Add Paused.
 - Download At… reveals a row "Starts at [01:00] · tomorrow": a `DatePicker(.hourAndMinute)` in `.stepperField` style. "Tomorrow" is inferred automatically, and an × removes the row.
 - While the row is showing, the primary button reads "Schedule".
+
+**Search view** (main window; the view control, ⌘2, File ▸ Search Torrents ⇧⌘F, the popover's `magnifyingglass`)
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ ●●● [Downloads|Search] Tide                                            [▯]   │
+│                        214 results from 4 sources                            │
+├─────────────────────────────────────────────────────────┬─────────────────────┤
+│ ( 🔍 ubuntu                              ⓧ ) [All Categories ▾] │ Inspector (300)     │
+├─────────────────────────────────────────────────────────┤                     │
+│ Name                         Size   Seeds  Peers  Added │                     │
+│ [box]  ubuntu-26.04-desktop… 6.52 GB  147   108  7 mo ago│                     │
+│        The Pirate Bay · Bitsearch                       │                     │
+└─────────────────────────────────────────────────────────┴─────────────────────┘
+```
+- **Search bar:** a native `NSSearchField` at the large control size, full width at the top of the content, with 20 horizontal and 12 vertical padding. The Category menu (All, Movies, TV, Music, Anime, Apps, Games, Books, Other) sits beside it and filters locally. The bar takes focus whenever the view appears. Clearing it returns to the empty state.
+- Toolbar: only the inspector toggle. The search state lives as long as the window: switching views keeps it, and closing the window drops it and its downloaded .torrent files. Nothing is created until the Search view first opens.
+- **Searching happens on Return only**, never per keystroke: the free sources have per-IP limits.
+- **Sources** (free, no key): Knaben (a meta-index: The Pirate Bay, YTS, Nyaa and more), The Pirate Bay directly, Bitsearch (a DHT index, 200 requests a day per IP) and Torrents-CSV. Each has 6 s, a 5xx is retried once, and a source that fails is a quiet note in the subtitle, never an error.
+- **Merging:** one row per info hash. Most seeds and peers across sources, the size most of them agree on, the earliest date, the union of trackers (12 at most), and the source names as the row's second line.
+- Results appear once, when every source has answered or timed out, sorted by seeds. Rows never re-sort by themselves; column headers sort.
+- Subtitle: "214 results from 4 sources", "12 of 214 results…" with a category, plus "· Bitsearch didn't respond" or "· Bitsearch's daily limit is reached".
+- **Table** columns: Name (category symbol, 13 medium name, 11 secondary sources line with "In Downloads" and a green check when the hash is already a download), Size, Seeds, Peers, Added (relative). Double-click or Return downloads; context menu: Download / Show in Downloads, Copy Magnet Link, Open on <source>. ⌘C copies the magnet.
+- **Inspector:** fixed header (15 semibold name, a 2×2 grid: Size, Peers, Added, Category), then Files and a collapsed Details (info hash, where it was found, uploader, tracker count), then [Copy Magnet Link] and the prominent [Download]. Already downloaded: "Already in your downloads" and [Show].
+- **Files** load for the selected row only, 400 ms after the selection rests:
+  - The index's list first (The Pirate Bay's names and sizes, or Bitsearch's paths).
+  - Then the real .torrent, from the source's own link (Nyaa) or a public cache by info hash. It's used only after the core has read it and its info hash matches. It replaces the list with the full tree and the "Skipping N extras" line.
+  - With neither: "The file list arrives when the download starts."
+- **Download** opens the usual Add window. With the verified .torrent it shows the real files, smart selection and free space, and starts without waiting for metadata; otherwise it gets the magnet.
+- Empty: "Search for Torrents" / "Searches The Pirate Bay, YTS, Nyaa, Bitsearch and more. Free, no account." No results: the system search empty state. Every source failed: "Can't Reach Any Search Source" (or "You're Offline") with [Try Again].
 
 **First run: Welcome window** (480 wide, one screen)
 - A 96pt app icon, "Welcome to {App}", and a one-line description.
@@ -696,6 +731,7 @@ Downloads run 01:00–08:00 every day. Next window opens in 3 hr 12 min.
 | Popover | Empty; mixed states with Completed; banner; drop overlay |
 | Main window | Empty; standard rows; compact rows; inspector Info, Files and Peers; multi-select |
 | Add window | Torrent default; files expanded; magnet fetching; URL; several items; low space; drive not connected; unreadable torrent |
+| Main window ▸ Search | Empty; results; inspector with the full tree; inspector with an index list; files loading; partial failure; category; no results; unreachable |
 | Import | Complete; missing progress file; nothing found |
 | Welcome | With and without a found download |
 | Settings | All 6 panes |
